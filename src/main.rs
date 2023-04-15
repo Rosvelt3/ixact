@@ -1,13 +1,16 @@
 use std::sync::{Arc, Mutex};
 
-use axum::{Server, Router, routing::get, extract::State};
-use sysinfo::{System, SystemExt, CpuExt};
+use axum::{extract::State, routing::get, Json, Router, Server, response::{IntoResponse, Html}};
+use sysinfo::{CpuExt, System, SystemExt};
 
 #[tokio::main]
 async fn main() {
-    let router = Router::new().route("/", get(root_get)).with_state(AppState{
-        sys: Arc::new(Mutex::new(System::new()))
-    });
+    let router = Router::new()
+        .route("/", get(root_get))
+        .route("/api/cpus", get(cpus_get))
+        .with_state(AppState {
+            sys: Arc::new(Mutex::new(System::new())),
+        });
     let server = Server::bind(&"0.0.0.0:3000".parse().unwrap()).serve(router.into_make_service());
     let addr = server.local_addr();
     println!("Listening on {addr}");
@@ -19,19 +22,17 @@ struct AppState {
     sys: Arc<Mutex<System>>,
 }
 
-async fn root_get(State(state): State<AppState>) -> String {
-    use std::fmt::Write;
+#[axum::debug_handler]
+async fn root_get() -> impl IntoResponse {
+    let markup = tokio::fs::read_to_string("src/index.html").await.unwrap();
+    Html(markup)
+}
 
-    let mut s = String::new();
-
+#[axum::debug_handler]
+async fn cpus_get(State(state): State<AppState>) -> impl IntoResponse {
     let mut sys = state.sys.lock().unwrap();
     sys.refresh_cpu();
-    for (i, cpu) in sys.cpus().iter().enumerate() {
-        let i = i +1;
 
-        let usage = cpu.cpu_usage();
-        writeln!(&mut s,"CPU {i} {usage}%").unwrap();
-    }
-
-    s
+    let v: Vec<_> = sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect();
+    Json(v)
 }
